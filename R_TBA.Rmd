@@ -1,0 +1,181 @@
+---
+title: "TBA"
+author: "Aleyna Demiralp"
+date: "2025-12-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Gerekli paketlerin yüklenmesi
+#install.packages("haven")
+#install.packages("psych")       
+#install.packages("factoextra")
+#install.packages("corrplot")
+#install.packages("PerformanceAnalytics")
+#install.packages("Hmisc")
+#install.packages("matlib")
+library(haven)  
+library(dplyr)
+library(PerformanceAnalytics)
+library(corrplot)
+library(Hmisc)
+library(matlib)
+library(psych)
+library(factoextra)
+```
+
+```{r}
+ibm_data <- read_sav("C:/Users/aleyna demiralp/Desktop/cda_dataset_orneklem_spss.sav")
+
+summary(ibm_data)
+```
+
+```{r}
+# ANALİZ İÇİN DEĞİŞKENLERİ SEÇ 
+df_kor <- ibm_data %>%
+  dplyr::select(
+    Age,
+    MonthlyIncome,
+    TotalWorkingYears,
+    YearsAtCompany,
+    YearsWithCurrManager,
+    TrainingTimesLastYear
+  ) 
+summary(df_kor)
+```
+```{r}
+# DETAYLI KORELASYON GRAFİĞİ 
+print("--- Grafik 1: Detaylı Korelasyon Matrisi ---")
+chart.Correlation(df_kor, histogram=TRUE, pch=19)
+```
+
+```{r}
+# GÖRSEL KORELASYON MATRİSİ 
+print("--- Grafik 2: Renkli Korelasyon Haritası ---")
+corrplot(cor(df_kor))
+```
+
+```{r}
+korelasyon<-cor(df_kor)
+korelasyon
+```
+
+```{r}
+# ANLAMLILIK DEĞERLERİ 
+# İlişkiler istatistiksel olarak anlamlı mı? (p < 0.05 mi?)
+print("--- Korelasyon ve P Değerleri (Hmisc) ---")
+rcorr(as.matrix(df_kor), type="pearson")
+```
+
+```{r}
+# KORELASYON MATRİSİNİN DETERMINANTI
+# Bu değer 0'a çok yakınsa değişkenler arasında aşırı çoklu bağlantı var demektir.
+# 0.00001'den büyük olması istenir.
+print("--- Determinant Değeri (0'dan büyük olmalı) ---")
+det(cor(df_kor))
+```
+
+```{r}
+# MATRİSİN TERSİ
+print("--- Ters Matris (Inverse Matrix - VIF Kontrolü) ---")
+invkor <- inv(korelasyon)
+colnames(invkor) <- rownames(invkor) <-colnames(korelasyon)
+invkor
+```
+```{r}
+# PCA UYGULANABİLİRLİĞİ 
+# KMO Örneklem Yeterliliği:
+
+print("--- KMO Testi ve Anti-Image Değerleri ---")
+KMO(df_kor) 
+
+print("--- Bartlett Küresellik Testi ---")
+# H0: Korelasyon matrisi birim matristir (İlişki yoktur).
+# p < 0.05 çıkarsa H0 reddedilir, analiz yapılabilir demektir.
+cortest.bartlett(cor(df_kor),nrow(df_kor))
+```
+
+```{r}
+# TEMEL BİLEŞENLER ANALİZİ 
+fit.pca <- prcomp(df_kor, scale = TRUE) 
+
+print("---  Yükler / Özvektörler (Loadings - Rotation) ---")
+# Bu tablo, her bir Temel Bileşenin (PC1, PC2...) hangi değişkenlerden oluştuğunu gösterir.
+fit.pca$rotation
+fit.pca$x
+```
+
+```{r}
+summary(fit.pca)
+(fit.pca$sdev)^2
+```
+```{r}
+((fit.pca$sdev)^2)/6
+```
+
+```{r}
+# YAMAÇ GRAFİĞİ (SCREE PLOT) 
+plot(fit.pca)
+plot(fit.pca,type="line")
+
+library(factoextra)
+scree <- fviz_eig(fit.pca)
+scree
+```
+
+```{r}
+# SEÇİLEN TEMEL BİLEŞENLERİN DENKLEMLERİ VE YÜKLERİ
+# Biz PC1 ve PC2'yi seçtiğimiz için sadece ilk 2 sütuna odaklanıyoruz.
+
+print("--- 1. Temel Bileşen  Katsayıları (Eigenvectors) ---")
+# Bu çıktıyı kullanarak Y1 = a*Age + b*Income... denklemini yazacağız.
+(fit.pca$rotation[, 1:2]) 
+
+print("--- 2. Temel Bileşen  Yükleri (Component Loadings) ---")
+# Katsayıların (Eigenvectors) standart sapma (Kök Lambda) ile çarpılmış halidir.
+
+print("--- PC1 Yükleri ---")
+fit.pca$rotation[, 1] * fit.pca$sdev[1]
+
+
+print("--- PC2 Yükleri ---")
+fit.pca$rotation[, 2] * fit.pca$sdev[2]
+
+```
+```{r}
+# TEMEL BİLEŞEN SKORLARININ VERİ SETİNE EKLENMESİ
+
+ibm_data$PC1_Skoru <- fit.pca$x[,1] # 1. Bileşen skorları
+ibm_data$PC2_Skoru <- fit.pca$x[,2] # 2. Bileşen skorları
+
+head(ibm_data[, c("Age", "MonthlyIncome", "PC1_Skoru", "PC2_Skoru")])
+```
+```{r}
+# GENEL ENDEKS OLUŞTURMA 
+# PC1 ve PC2 skorlarını toplayarak her çalışan için genel bir "İş Gücü Endeksi" oluşturuyoruz.
+
+ibm_data$index <- ibm_data$PC1_Skoru + ibm_data$PC2_Skoru
+head(ibm_data[, c("PC1_Skoru", "PC2_Skoru", "index")])
+
+```
+
+```{r}
+# EN YÜKSEK PUANLI ÇALIŞANLARIN SIRALANMASI 
+sirali_liste <- ibm_data[order(ibm_data$index, decreasing = TRUE), ]
+head(sirali_liste[, c("Age", "MonthlyIncome", "TotalWorkingYears", "index")], 10)
+```
+
+```{r}
+# DEĞİŞKENLERİN TEMEL BİLEŞEN HARİTASI 
+
+print("--- Değişkenler İçin Temel Bileşen Haritası ---")
+fviz_pca_var(fit.pca, 
+             col.var = "steelblue",
+             repel = TRUE 
+)
+```
+

@@ -1,0 +1,177 @@
+---
+title: "KÜMELEME"
+author: "Aleyna Demiralp"
+date: "2026-01-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(haven)
+library(dendextend) 
+library(tidyverse)
+library(factoextra)
+# Veriyi Oku eksiklikler varsa temizle
+veri <- read_sav("C:/Users/aleyna demiralp/Desktop/cda_dataset_orneklem_spss - kumeleme.sav")
+veri <- na.omit(veri) 
+```
+
+
+```{r}
+analiz_verisi <- veri %>%
+  select(MonthlyIncome, PercentSalaryHike, YearsWithCurrManager, NumCompaniesWorked)
+summary(analiz_verisi)
+```
+
+```{r}
+# Veriyi Ölçekle (Standardizasyon)
+mydata <- scale(analiz_verisi)
+```
+
+```{r}
+# Korelasyon Matrisi 
+library("Hmisc")
+rcorr(as.matrix(analiz_verisi), type="pearson")
+```
+
+```{r}
+# Hiyerarşik Kümeleme
+
+# Uzaklık Matrisi 
+d <- dist(mydata, method = "euclidean") 
+
+# Kümeleme Algoritması (Ward Metodu)
+fit <- hclust(d, method="ward.D") 
+
+# Dendrogram Çizimi
+dend <- as.dendrogram(fit) 
+
+plot(dend, main = "Hiyerarsik Kumeleme Dendrogramı", ylab = "Uzaklık", leaflab = "none")
+
+# Renkli Çizim (k=3)
+plot(color_branches(dend, k=3), main = "Renklendirilmis Dendrogram (k=3)", leaflab = "none")
+
+```
+```{r}
+# Grafik Düzenleme ve Etiketleme 
+
+# Veri Hazırlığı
+# Aykırı değer olmadığı için satır silmiyoruz.Ama hocanın mantığıyla devam etmek için verimizi 'veri2' olarak isimlendirelim.
+veri2 <- analiz_verisi
+# Eğer ilerde bir satırı (mesela 10. sıradakini) atmak istersek: veri2 <- analiz_verisi[-10,]
+
+# Mesafe ve Kümeleme Hesabı 
+# Veriyi tekrar scale ediyoruz
+mydata2 <- scale(veri2) 
+d2 <- dist(mydata2, method = "euclidean")
+fit2 <- hclust(d2, method = "ward.D")
+dend2 <- as.dendrogram(fit2)
+
+# Etiketleri Özelleştirme 
+labels(dend2) <- paste(as.character(veri$ID)[order.dendrogram(dend2)],
+                       "(", labels(dend2), ")", sep = "")
+plot(color_branches(dend2, k=3))
+
+# Çizim ve Yerleşim Ayarı
+par(mar = c(8, 3, 2, 1)) 
+plot(color_branches(dend2, k=3), main = "Calısan Kumeleri")
+
+```
+```{r}
+# GÖRSELİ GÜZELLEŞTİRME 
+geneldend <- dend2 %>%
+  set("branches_lwd", 2.5) %>%        # Dalları kalınlaştırır 
+  set("branches_k_color", k = 3) %>%  # Dalları renklendirir
+  set("labels_cex", 0.8) %>%          # Yazı boyutunu ayarlar
+  set("labels_colors", k = 3)         # Yazıları da o kümenin rengine boyar
+
+plot(geneldend,font.axis = 2) #type="triangle"
+```
+```{r}
+library(circlize)
+geneldend %>%
+  set("labels_cex", k=3) %>% 
+  circlize_dendrogram(dend_track_height = 0.6)
+```
+```{r}
+# Hiyerarşik Olmayan Kümeleme
+# K-Means İçin En Uygun Küme Sayısını Belirleme 
+# K-Means her seferinde rastgele başlar, sonuç değişmesin diye sabitliyoruz
+set.seed(123) 
+
+# WSS (Elbow - Dirsek) Yöntemi
+fviz_nbclust(mydata, kmeans, method = "wss") 
+
+
+# Silhouette (Siluet) Yöntemi
+fviz_nbclust(mydata, kmeans, method = "silhouette") 
+```
+```{r}
+#  K-Means Analizi (Karar: k=3)
+set.seed(123) 
+km.res <- kmeans(mydata, centers = 3, iter.max = 10, algorithm = "Lloyd")
+t(km.res$centers)
+```
+```{r}
+# Kümelerin 2D Görselleştirmesi (Cluster Plot) 
+library(cluster)
+# clusplot fonksiyonu veriyi 2 boyuta indirgeyerek (PCA) çizer.
+
+clusplot(mydata, 
+         km.res$cluster, 
+         main = 'K-Means Kumelerinin 2 Boyutlu Gosterimi',
+         color = TRUE,       
+         shade = TRUE,         
+         labels = 2,           
+         lines = 0)            
+```
+```{r}
+# Görselleştirme ve Veriye İşleme 
+
+library(factoextra)
+
+# Küme Görselleştirmesi (fviz_cluster)
+fviz_cluster(km.res, 
+             data = mydata, 
+             palette = "jco",            
+             geom = "point",              
+             ggtheme = theme_minimal(),   
+             main = "K-Means Kumeleme Sonucları")
+
+# Küme Bilgisini Orijinal Veriye Ekleme
+veri$Cluster <- km.res$cluster
+veri$Cluster <- as.factor(km.res$cluster)
+
+# Kontrol Edelim
+# İlk 5 çalışanın hangi kümeye atandığını görelim
+head(veri %>% select(ID, MonthlyIncome, Cluster))
+```
+```{r}
+# ANOVA Testleri (Kümeler Arası Farklılık Analizi)
+library(rstatix)
+veri$Cluster <- as.factor(veri$Cluster)
+
+# 1. Aylık Gelir (MonthlyIncome) için ANOVA
+# Soru: Kümelerin maaş ortalamaları birbirinden farklı mı?
+income_aov <- aov(MonthlyIncome ~ Cluster, data = veri)
+summary(income_aov)
+
+# 2. Zam Oranı (PercentSalaryHike) için ANOVA
+# Soru: Kümelerin zam oranları birbirinden farklı mı?
+hike_aov <- aov(PercentSalaryHike ~ Cluster, data = veri)
+summary(hike_aov)
+
+# 3. Yöneticiyle Geçen Yıl (YearsWithCurrManager) için ANOVA
+# Soru: Kümelerin yöneticiyle çalışma süreleri farklı mı?
+manager_aov <- aov(YearsWithCurrManager ~ Cluster, data = veri)
+summary(manager_aov)
+
+# 4. Çalışılan Şirket Sayısı (NumCompaniesWorked) için ANOVA
+# Soru: Kümelerin tecrübeleri (şirket sayıları) farklı mı?
+companies_aov <- aov(NumCompaniesWorked ~ Cluster, data = veri)
+summary(companies_aov)
+```
+

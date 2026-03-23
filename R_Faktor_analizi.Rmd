@@ -1,0 +1,104 @@
+---
+title: "FAKTÖR ANALİZİ"
+author: "Aleyna Demiralp"
+date: "2025-12-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(haven)
+raw_data <- read_sav("cda_dataset_orneklem_spss.sav")
+secilen_degiskenler <- c("Age", "MonthlyIncome", "TotalWorkingYears", 
+                         "YearsAtCompany", "YearsWithCurrManager", "TrainingTimesLastYear")
+
+analiz_data <- raw_data[secilen_degiskenler]
+analiz_data <- na.omit(analiz_data)
+summary(analiz_data)
+```
+```{r}
+library(corrplot)
+corrplot(cor(analiz_data))
+korelasyon <- cor(analiz_data)
+print(korelasyon)
+```
+```{r}
+library("Hmisc") 
+rcorr(as.matrix(analiz_data), type="pearson")
+```
+```{r}
+det(cor(analiz_data))
+```
+```{r}
+library(matlib)
+invkor <- inv(korelasyon)
+colnames(invkor) <- rownames(invkor) <- colnames(korelasyon)
+print(invkor)
+```
+```{r}
+library(psych) 
+kmo_sonuc <- KMO(analiz_data)
+print(kmo_sonuc)
+bartlett_sonuc <- cortest.bartlett(cor(analiz_data), n = nrow(analiz_data))
+print(bartlett_sonuc)
+```
+```{r}
+# Temel Bileşenler Analizi (TBA) - Döndürülmemiş Çözüm
+fa_kokl <- principal(analiz_data, nfactors = 2, rotate = "none")
+print(fa_kokl$loadings, digits=3, cutoff=.3, sort=TRUE)
+```
+```{r}
+fa_kokl$communality
+```
+```{r}
+colSums(fa_kokl$loadings[ , ]^2) / 6  
+```
+```{r}
+plot(fa_kokl$values, type="b", main="Scree Plot", 
+     xlab="Bileşen Sayısı", ylab="Özdeğerler (Eigenvalues)", pch=19, col="blue")
+```
+```{r}
+#TrainingTimesLastYear değişkeninin ortak varyansı (communality) düşük (0.10) olmasına rağmen; analizden çıkarıldığında faktör yapısının tek boyuta (sadece Kıdem) indirgeneceği ve veri setindeki potansiyel varyasyonun kaybolacağı göz önünde bulundurularak analizde tutulmuştur. Bu sayede 2. faktörün sınırda da olsa (Eigenvalue: 1.07) ortaya çıkması sağlanmıştır.
+
+#fa_deneme <- principal(analiz_data[,-6], nfactors = 2, rotate = "none")
+#print(fa_deneme$loadings, digits=3, cutoff=.3, sort=TRUE)
+```
+
+```{r}
+fa_final <- principal(analiz_data, nfactors = 2, rotate = "varimax")
+print(fa_final$loadings, digits=3, cutoff=.3, sort=TRUE)
+```
+```{r}
+# FAKTÖR YÜK FORMÜLLERİ 
+
+# FAKTÖR 1: Kurumsal Aidiyet
+# RC1 = 0.912 * YearsAtCompany + 0.929 * YearsWithCurrManager
+
+# FAKTÖR 2: Kariyer Olgunluğu
+# RC2 = 0.829 * Age + 0.789 * TotalWorkingYears + 0.738 * MonthlyIncome
+
+# NOT: TrainingTimesLastYear değişkeni yük değeri düşük olduğu için formüle alınmamıştır.
+```
+
+```{r}
+fa.diagram(fa_final)
+```
+```{r}
+# 2 Faktörlü Yük Dağılım Grafiği
+fyuk2 <- fa_final$loadings[,1:2] 
+factor.plot(fyuk2, 
+            cut=0.3, 
+            labels=rownames(fa_final$loadings[,1:2]), 
+            font=2, 
+            cex=0.8, 
+            main="Faktorlerin Konumu (RC1 vs RC2)",
+            pos=1)
+```
+
+
+
+

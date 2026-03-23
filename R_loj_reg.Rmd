@@ -1,0 +1,258 @@
+---
+title: "LOJİSTİK REGRESYON"
+author: "Aleyna Demiralp"
+date: "2026-01-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(modelr)
+library(broom)
+library(haven)
+library(corrplot)
+library(matlib)
+
+# Veriyi Yükleme
+df <- read_sav("C:/Users/aleyna demiralp/Desktop/cda_dataset_orneklem_spss.sav") 
+
+# Hedef Değişkeni Düzenleme
+df$Attrition <- factor(df$Attrition, levels = c("No", "Yes"))
+summary(df$Attrition)
+
+# Korelasyon İçin Sadece Sayısal Değişkenleri Seçme
+secilen_degiskenler <- df %>% 
+  dplyr::select(Age, DistanceFromHome, MonthlyIncome, PercentSalaryHike, 
+         TotalWorkingYears, TrainingTimesLastYear, YearsAtCompany, YearsWithCurrManager) %>%
+  na.omit()
+
+# Korelasyon Matrisi ve Grafik
+M <- cor(secilen_degiskenler)
+corrplot(M, method="number", type="upper", tl.cex = 0.6)
+```
+
+```{r}
+# VIF (Ters Matris) Kontrolü
+invkor <- try(inv(M))
+print(invkor)
+```
+
+```{r}
+# Değişken Çıkarma
+df_n_sayisal <- secilen_degiskenler %>% 
+  dplyr::select(-TotalWorkingYears, -YearsWithCurrManager)
+
+# Temizlenmiş korelasyon grafiğine bakalım
+M_yeni <- cor(df_n_sayisal)
+corrplot(M_yeni, method="number", type="upper", tl.cex = 0.6)
+```
+
+```{r}
+# MODEL İÇİN VERİ SETİ
+df_model_icin <- df %>%
+  dplyr::select(Attrition, 
+         Age, 
+         DistanceFromHome, 
+         MonthlyIncome, 
+         PercentSalaryHike, 
+         TrainingTimesLastYear, 
+         YearsAtCompany) %>%
+  na.omit()
+
+# Lojistik Regresyon Modeli
+model_ibm <- glm(Attrition ~ Age + DistanceFromHome + MonthlyIncome + 
+                 PercentSalaryHike + TrainingTimesLastYear + YearsAtCompany, 
+                 family = "binomial", 
+                 data = df_model_icin)
+
+summary(model_ibm)
+```
+```{r}
+# --- SPSS OMNIBUS TESTS OF MODEL COEFFICIENTS TABLOSU ---
+# Modelin Deviance (Sapma) Değerleri
+# Null Deviance: Sadece sabit terim varkenki hata
+# Deviance: Bizim değişkenleri eklediğimizdeki hata
+print(paste("Null Deviance:", model_ibm$null.deviance))
+print(paste("Residual Deviance:", model_ibm$deviance))
+
+# Ki-Kare (Chi-Square) İstatistiği Hesabı
+# Modelimiz hatayı ne kadar azaltmış?
+kikare <- model_ibm$null.deviance - model_ibm$deviance
+kikare
+```
+
+```{r}
+# Serbestlik Derecesi Hesabı
+# Modele kaç tane anlamlı değişken ekledik?
+model_ibm$df.null
+model_ibm$df.residual
+df_degeri <- model_ibm$df.null - model_ibm$df.residual
+df_degeri
+```
+
+```{r}
+# P-DEĞERİ (SİGNIFICANCE) HESABI
+# (p < 0.05 ise eklenen değişkenlerin modele katkısı anlamlıdır.)
+
+kikare.p <- 1 - pchisq(kikare, df_degeri)
+kikare.p
+
+# Eğer P-Değeri (Sig.) 0.05'ten küçükse;
+# "H0 Red: Kurduğumuz model anlamlıdır. Bağımsız değişkenler, bağımlı değişkeni açıklamada başarılıdır."
+```
+
+```{r}
+### Hosmer-Lemeshow Testi (Model Uyum İyiliği)
+# Amaç: Modelin veriye ne kadar iyi uyduğunu test etmek.
+# Beklenti: p > 0.05 olmasıdır. (Yani model ile gerçek veri arasında fark yoktur.)
+
+library(ResourceSelection)
+
+# model_ibm$y -> Gerçek değerler (0 veya 1)
+# fitted(model_ibm) -> Modelin tahmin ettiği olasılıklar
+hoslem.test(model_ibm$y, fitted(model_ibm))
+```
+```{r}
+# Modelin R^2 değerlerinin hesabı
+library(DescTools)
+
+# Modelin R-Kare Değerleri (CoxSnell, Nagelkerke ve McFadden)
+PseudoR2(model_ibm, which = c("CoxSnell", "Nagelkerke", "McFadden"))
+```
+```{r}
+# --- ODDS RATIO (OR) VE GÜVEN ARALIKLARI ---
+# OR > 1 ise riski artırır, OR < 1 ise riski azaltır.
+
+# Odds Ratio Değerleri (Katsayılar)
+exp(coef(model_ibm))
+
+# %95 Güven Aralıkları 
+# Bu aralık "1" sayısını içeriyorsa, o değişken istatistiksel olarak anlamsızdır.
+exp(confint.default(model_ibm, level = 0.95))
+```
+```{r}
+# SINIFLANDIRMA TABLOSU 
+
+tahmin_olasilik <- fitted(model_ibm)
+
+# Eğer olasılık 0.5'ten büyükse "Yes" (Ayrıldı), değilse "No" (Kaldı) olarak etiketle
+tahmin_sinif <- ifelse(tahmin_olasilik > 0.5, "Yes", "No")
+
+# Gerçek değerler ile Tahminleri karşılaştıran tabloyu oluştur
+# (Satırlar Gerçek Durumu, Sütunlar Modelin Tahminini gösterir)
+t_tab <- table(Gercek = df_model_icin$Attrition, Tahmin = tahmin_sinif)
+t_tab
+
+# Doğruluk Oranını hesaplayalım
+dogruluk_orani <- sum(diag(t_tab)) / sum(t_tab)
+dogruluk_orani
+```
+```{r}
+# ATAMA TABLOSU GÖRSELLEŞTİRME
+library(cvms)
+library(ggplot2)
+library(broom)    
+library(tibble)  
+
+datatib <- tibble("target" = df_model_icin$Attrition, 
+                  "prediction" = tahmin_sinif)
+datatib
+
+basic_table <- table(datatib)
+basic_table
+cfm <- tidy(basic_table)
+cfm
+
+# Grafiği Çizme
+plot_confusion_matrix(cfm, 
+                      target_col = "target", 
+                      prediction_col = "prediction",
+                      counts_col = "n",
+                      add_normalized = FALSE,
+                      add_row_percentages = FALSE,
+                      font_col_percentages= font(size = 6),
+                      font_counts = font(size = 6),
+                      tile_border_color = "black") +
+  xlab("Gercek Durum") +
+  ylab("Tahmin Edilen") +
+  theme(axis.text=element_text(size=12, face="bold"),
+        axis.title=element_text(size=14, face="bold"))
+```
+```{r}
+# STEPWISE YÖNTEMLER İLE LOJİSTİK REGRESYON
+# Backward (Geriye Doğru Eleme): Tüm değişkenlerle başlar, 
+# anlamsız olanları teker teker atar.
+
+library(MASS) 
+step_model <- step(model_ibm, direction = "backward")
+step_model
+summary(step_model)
+
+# Yeni Katsayıların Üstel Hali (Odds Ratio)
+# Bakalım hangi değişkenler hayatta kaldı ve etkileri ne oldu?
+exp(step_model$coefficients)
+
+# Güven Aralıkları
+exp(confint.default(step_model, level = 0.95))
+```
+```{r}
+# STEPWISE) MODEL İÇİN ATAMA TABLOSU 
+type_pred <- fitted(step_model)
+
+# Olasılık > 0.5 ise "Yes" (Ayrıldı), değilse "No" (Kaldı) de
+typefac <- ifelse(type_pred > 0.5, "Yes", "No")
+
+# Tabloyu Oluştur (Gerçek vs Tahmin)
+t_tab <- table(Gercek = df_model_icin$Attrition, Tahmin = typefac)
+t_tab
+
+# TOPLAM DOĞRU ATANMA YÜZDESİ 
+dogruluk <- sum(diag(t_tab)) / sum(t_tab)
+dogruluk
+
+```
+```{r}
+# STEPWISE MODEL SONUÇLARINI GÖRSELLEŞTİRME
+library(cvms)
+library(ggplot2)
+library(broom)    
+library(tibble)   
+
+datatib <- tibble("target" = df_model_icin$Attrition, 
+                  "prediction" = typefac)
+datatib
+
+basic_table <- table(datatib)
+basic_table
+cfm <- tidy(basic_table)
+cfm
+# Grafiği Çizme
+plot_confusion_matrix(cfm, 
+                      target_col = "target", 
+                      prediction_col = "prediction",
+                      counts_col = "n",
+                      add_normalized = FALSE,
+                      add_row_percentages = FALSE,
+                      font_col_percentages= font(size = 6),
+                      font_counts = font(size = 6),
+                      tile_border_color = "black") +
+  xlab("Gercek Durum") +  
+  ylab("Tahmin Edilen") +
+  theme(axis.text=element_text(size=12, face="bold"),
+        axis.title=element_text(size=14, face="bold"))
+```
+```{r}
+# --- ALTERNATİF GÖRSEL (FOURFOLD PLOT) ---
+# Daire dilimlerinin büyüklüğü, o gruptaki kişi sayısını gösterir.
+
+fourfoldplot(t_tab,
+             color = c("#CC6666", "#99CC99"), 
+             conf.level = 0,                  
+             margin = 1,                      
+             main = "Siniflama Tablosu")      
+```
+

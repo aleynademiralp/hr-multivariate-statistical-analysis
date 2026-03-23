@@ -1,0 +1,245 @@
+---
+title: "Diskriminant Analizi"
+author: "Aleyna Demiralp"
+date: "2025-12-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(haven)
+library(dplyr)
+
+calisan_data <- read_sav("C:/Users/aleyna demiralp/Desktop/cda_dataset_orneklem_spss.sav") 
+
+#Değişken Seçimi (Diskriminant Analizi İçin Hazırlık)
+
+calisan_data <- calisan_data %>% 
+dplyr::select(EducationField,         # Bağımlı Değişken
+         Ln_Income,             
+         Ln_Age,                 
+         TotalWorkingYears,      
+         YearsAtCompany,         
+         TrainingTimesLastYear,  
+         Ln_Sat)                
+
+# Eksik Veri Temizliği
+calisan_data <- na.omit(calisan_data)
+
+# Son Kontrol
+summary(calisan_data)
+```
+```{r}
+library(funModeling)
+plot_num(calisan_data[,-1])
+```
+```{r}
+# (Univariate Normality)
+# H0: Değişken normal dağılım göstermektedir.
+# H1: Değişken normal dağılım göstermemektedir. (p < 0.05 ise H0 reddedilir)
+
+shapiro.test(calisan_data$Ln_Income)
+shapiro.test(calisan_data$Ln_Age)
+shapiro.test(calisan_data$TotalWorkingYears)
+shapiro.test(calisan_data$YearsAtCompany)
+shapiro.test(calisan_data$TrainingTimesLastYear)
+shapiro.test(calisan_data$Ln_Sat)
+
+```
+```{r}
+# ÇOK DEĞİŞKENLİ NORMALLİK TESTİ (Multivariate Normality)
+library(dplyr)
+library(rstatix)
+# Grup değişkeni olan 'EducationField' sütununu çıkarıp 
+# sadece sayısal değişkenler üzerinde test yapıyoruz.
+calisan_data %>% 
+  dplyr::select(!c(EducationField)) %>% 
+  mshapiro_test()
+```
+```{r}
+# KORELASYON MATRİSİ (Multicollinearity Kontrolü)
+library(corrplot)
+# EducationField hariç diğerlerinin korelasyonuna bakıyoruz.
+korelasyon_matrisi <- cor(calisan_data[,-1], method = "spearman")
+
+corrplot(korelasyon_matrisi, method = "number", type = "upper", 
+          tl.col = "black", tl.srt = 45)
+```
+```{r}
+# DEĞİŞKEN ELEME VE GRUP ETİKETLEME
+
+# Değişken Çıkarma 
+# korelasyon matrisinde 0.85 üzeri bir ilişki görmediğimiz için,değişken atma işlemi yapmıyoruz.Ama yapsaydık;
+#calisan_data_new <- calisan_data[, -5] 
+
+# Grup Değişkenini Faktöre Çevirme
+# mevcut veri setinde 'EducationField' değişkeni grup isimlerini (String/Character) içermektedir.
+# Bu nedenle manuel etiketleme (labels) işlemine gerek duyulmamış, değişken doğrudan faktör formatına dönüştürülmüştür.
+calisan_data$EducationField <-factor(calisan_data$EducationField)
+summary(calisan_data)
+```
+```{r}
+# KOVARYANS MATRİSLERİNİN HOMOJENLİĞİ (Box-M Testi)
+library(biotools)
+box_m_sonuc <- boxM(calisan_data[, -1], calisan_data$EducationField)
+
+print(box_m_sonuc)
+```
+```{r}
+# LDA MODELİNİ KURMA (MULTI-CLASS)
+library(MASS)
+lda_model <- lda(EducationField ~ ., data = calisan_data)
+(lda_model)
+
+# DİSKRİMİNANT FONKSİYONU DENKLEMİ
+ortalama_degerler <- apply(calisan_data[,-1], 2, mean)
+sabit_terim <- (-ortalama_degerler) %*% (lda_model$scaling)
+
+print("Sabit Terimler")
+print(sabit_terim)
+
+print("Katsayilar")
+print(lda_model$scaling)
+```
+```{r}
+# GRUP TAHMİNİ YAPILMASI (Prediction)
+lda_tahmin <- predict(lda_model)
+
+# 1. Diskriminant Skorlarını Görmek İstersen (LD1 ve LD2 Puanları)
+lda_tahmin$x
+
+# 2. Sınıf Tahminlerini Görmek İstersen 
+# (Modelin "Bence bu kişi Medicalci" dediği yer)
+lda_tahmin$class
+```
+```{r}
+# İki fonksiyon da anlamlı olduğundan kullanılmayacak
+# pred_restricted <- predict(lda_model, newdata = calisan_data, dimen = 1)
+```
+
+```{r}
+# GRAFİKLER (Histogramlar)
+
+# 1. Diskriminant Fonksiyonu (LD1) için Histogram
+ldahist(lda_tahmin$x[,1], g = calisan_data$EducationField)
+
+# 2. Diskriminant Fonksiyonu (LD2) için Histogram
+ldahist(lda_tahmin$x[,2], g = calisan_data$EducationField)
+```
+```{r}
+# SINIFLANDIRMA BAŞARISI (CONFUSION MATRIX)
+# Çapraz Tablo Oluşturma
+# Satırlar: Gerçek Gruplar (Actual)
+# Sütunlar: Modelin Tahminleri (Predicted)
+tablo_siniflandirma <- table(calisan_data$EducationField, lda_tahmin$class)
+
+print(tablo_siniflandirma)
+
+# Doğru Sınıflandırma Oranı (Accuracy)
+# (Köşegenlerdeki sayıların toplamı / Toplam kişi sayısı)
+basari_orani <- sum(diag(tablo_siniflandirma)) / sum(tablo_siniflandirma)
+basari_orani
+```
+```{r}
+# NİSPİ ŞANS KRİTERİ (Proportional Chance Criterion)
+
+# Hocanın uzun yöntemiyle hesaplama (3 grup için):
+nispi_sans <- as.vector(lda_model$prior[1]^2 + lda_model$prior[2]^2 + lda_model$prior[3]^2)
+
+print(nispi_sans)
+```
+```{r}
+# KARŞILAŞTIRMA (Gerçek vs Tahmin)
+
+karsilastirma <- cbind(calisan_data$EducationField,lda_tahmin$class) 
+                      
+# Listenin çok uzun olacağı için sadece ilk 15 kişiye bakalım
+print(head(karsilastirma, 15))
+```
+```{r}
+# ---------------------------------------------------------
+# 3'LÜ ÇİZİM (SCATTER PLOT - GRUP AYRIMI)
+# ---------------------------------------------------------
+library(ggplot2)
+
+# 1. Diskriminant Skorlarını veriye ekleyelim
+calisan_data$ld1 <- predict(lda_model)$x[, 1]
+calisan_data$ld2 <- predict(lda_model)$x[, 2]
+
+# 2. Grafiği Çizelim
+ggplot(data = calisan_data) +
+  geom_point(aes(x = ld1, y = ld2, col = EducationField), size = 2.5) 
+```
+```{r}
+# PARTITION MAP (BÖLGE HARİTASI / TERRITORIAL MAP)
+library(klaR)
+
+# Haritayı Çizelim
+# Formül: Grup ~ X_Ekseni + Y_Ekseni
+partimat(EducationField ~ ld1 + ld2, data = calisan_data, method = "lda",
+         main = "Sınıflandırma Bölgeleri (Territorial Map)")
+```
+```{r}
+# ADIMSAL (STEPWISE) DİSKRİMİNANT ANALİZİ
+# Amacımız: Grupları ayırmada en etkili değişkenleri belirlemek.
+
+library(dplyr)
+library(klaR)
+
+# 1. ld1 ve ld2 sütunlarını analizden çıkararak geçici bir veri seti yapıyoruz
+veri_stepwise <- calisan_data %>% 
+  dplyr::select(-any_of(c("ld1", "ld2")))
+
+stepwise_sonuc <- greedy.wilks(EducationField ~ ., data = veri_stepwise)
+
+print(stepwise_sonuc$results)
+```
+```{r}
+# TRAIN / TEST AYRIMI
+library(MASS)
+library(dplyr)
+
+# Önce Veriyi Temizleyelim 
+veri_ml <- calisan_data %>% 
+  dplyr::select(-any_of(c("ld1", "ld2")))
+
+# Veriyi Eğitim,Test olarak ayıralım
+set.seed(123)
+indeks <- sample(2, nrow(veri_ml), 
+                 replace = TRUE, 
+                 prob = c(0.8, 0.2)) 
+
+egitim_verisi <- veri_ml[indeks == 1, ]
+test_verisi   <- veri_ml[indeks == 2, ]
+
+# Modeli Kuralım
+lda_ml_model <- lda(EducationField ~ ., data = egitim_verisi)
+print(lda_ml_model)
+```
+
+```{r}
+# EĞİTİM Verisi Başarısı
+train_tahmin <- predict(lda_ml_model, egitim_verisi)$class
+tablo_train <- table(Tahmin = train_tahmin, Gercek = egitim_verisi$EducationField)
+
+print("Egitim (Train) Seti Basarısı:")
+print(tablo_train)
+basari_train <- sum(diag(tablo_train)) / sum(tablo_train)
+print(paste("Egitim Dogruluk Oranı: %", round(basari_train*100, 2)))
+```
+
+```{r}
+# B) TEST Verisi Başarısı
+test_tahmin <- predict(lda_ml_model, test_verisi)$class
+tablo_test <- table(Tahmin = test_tahmin, Gercek = test_verisi$EducationField)
+
+print("Test Seti Basarısı:")
+print(tablo_test)
+basari_test <- sum(diag(tablo_test)) / sum(tablo_test)
+print(paste("Test Dogruluk Oranı: %", round(basari_test*100, 2)))
+```
+
+

@@ -1,0 +1,262 @@
+---
+title: "R_manova"
+author: "Aleyna Demiralp"
+date: "2025-12-26"
+output: html_document
+---
+---
+title: "R_manova_Loglu"
+author: "Aleyna Demiralp"
+date: "2025-12-26"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+# AYARLAR VE KÜTÜPHANELER
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(car)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(haven)
+library(effectsize)
+library(heplots)
+library(gplots)
+library(biotools)
+
+# VERİ SETİNİN OKUNMASI
+ibm_data <- read_sav("C:/Users/aleyna demiralp/Desktop/cda_dataset_orneklem_spss.sav")
+
+# Analiz için alt küme oluşturma
+df_analiz <- ibm_data %>%
+  dplyr::select(EducationField, Department, Gender, MonthlyIncome, Age, JobSatisfaction)
+
+# Faktör Dönüşümleri
+df_analiz$EducationField <- as_factor(df_analiz$EducationField)
+df_analiz$Department     <- as_factor(df_analiz$Department)
+df_analiz$Gender         <- as_factor(df_analiz$Gender)
+
+# LOGARİTMA DÖNÜŞÜMÜ 
+# Veriler normal dağılmadığı ve varyans homojenliği bozulduğu için Log alıyoruz.
+
+df_analiz$Ln_Income <- log(df_analiz$MonthlyIncome)
+df_analiz$Ln_Age    <- log(df_analiz$Age)
+df_analiz$Ln_Sat    <- log(df_analiz$JobSatisfaction)
+
+print("--- Log Dönüşümü Sonrası Veri Özeti ---")
+summary(df_analiz[, c("Ln_Income", "Ln_Age", "Ln_Sat")])
+```
+
+```{r}
+# GÖRSELLEŞTİRME
+
+# ORTALAMA GRAFİKLERİ 
+
+# Gelir (Ln_Income) için:
+plotmeans(Ln_Income ~ EducationField, 
+          xlab="Egitim Alani", ylab="Ln(Aylik Gelir)", 
+          main="Ortalama Log-Gelir Grafigi", 
+          data=df_analiz)
+
+# Yaş (Ln_Age) için:
+plotmeans(Ln_Age ~ EducationField, 
+          xlab="Egitim Alani", ylab="Ln(Yas)", 
+          main="Ortalama Log-Yas Grafigi", 
+          data=df_analiz)
+
+# İş Tatmini (Ln_Sat) için:
+plotmeans(Ln_Sat ~ EducationField, 
+          xlab="Egitim Alani", ylab="Ln(Is Tatmini)", 
+          main="Ortalama Log-Tatmin Grafigi", 
+          data=df_analiz)
+```
+
+```{r}
+# ÇOK DEĞİŞKENLİ NORMALLİK TESTİ 
+print("--- Cok Degiskenli Normallik Testi (Shapiro - Loglu) ---")
+df_analiz %>%
+  dplyr::select(Ln_Income, Ln_Age, Ln_Sat) %>%
+  mshapiro_test()
+
+# KOVARYANS HOMOJENLİĞİ (Box-M Testi)
+print("--- Kovaryans Homojenligi Testi (Box M - Loglu) ---")
+box_m(df_analiz[, c("Ln_Income", "Ln_Age", "Ln_Sat")], df_analiz$EducationField)
+```
+
+```{r}
+# TEK YÖNLÜ MANOVA
+
+# MANOVA Modelini Kuralım 
+manova_sonuc <- manova(cbind(Ln_Income, Ln_Age, Ln_Sat) ~ EducationField, data = df_analiz)
+
+# Sonuçlara Bakalım (Wilks Lambda)
+print("--- MANOVA Test Sonuçları (Wilks) ---")
+summary(manova_sonuc, test = "Wilks")
+
+# Etki Büyüklüğü
+print("--- Etki Büyüklüğü (Eta Kare) ---")
+etasq(manova_sonuc, test="Wilks")
+```
+
+```{r}
+# VARYANS HOMOJENLİĞİ (LEVENE TESTİ)
+print("--- Levene Testi Sonuçları (Loglu Veriler) ---")
+df_analiz %>% 
+  pivot_longer(c(Ln_Income, Ln_Age, Ln_Sat), names_to = "variable", values_to = "value") %>%
+  group_by(variable) %>%
+  levene_test(value ~ EducationField, center=mean)
+```
+
+```{r}
+# HANGİ DEĞİŞKEN FARK YARATIYOR? (ANOVA) 
+print("--- Değişken Bazlı İnceleme (Tests of Between-Subjects Effects) ---")
+summary.aov(manova_sonuc)
+```
+
+```{r}
+# POST-HOC TESTLERİ (ÇOKLU KARŞILAŞTIRMA)
+
+# 1. Yaş ve İş Tatmini: Levene p > 0.05 (Varyans Eşit) -> TUKEY
+# 2. Gelir (Ln_Income): Levene p < 0.05 (Varyans Eşit Değil) -> GAMES-HOWELL
+
+
+print("--- A) VARYANSI EŞİT OLANLAR İÇİN TUKEY (Yaş ve Tatmin) ---")
+
+# Yaş ve Tatmin değişkenlerini seçip Tukey yapıyoruz
+tukey_sonuclar <- df_analiz %>%
+  dplyr::select(EducationField, Ln_Age, Ln_Sat) %>% 
+  pivot_longer(c(Ln_Age, Ln_Sat), names_to = "variables", values_to = "value") %>%
+  group_by(variables) %>%
+  tukey_hsd(value ~ EducationField)
+
+print(tukey_sonuclar)
+
+
+print("--- B) VARYANSI EŞİT OLMAYAN İÇİN GAMES-HOWELL (Gelir) ---")
+
+# Sadece Gelir (Ln_Income) için Games-Howell (Tamhane karşılığı)
+gh_income <- df_analiz %>%
+  games_howell_test(Ln_Income ~ EducationField)
+
+print(gh_income)
+```
+
+
+```{r}
+# ÇİFT YÖNLÜ MANOVA (ETKİLEŞİM ANALİZİ)
+# Eğitim Alanı * Cinsiyet Etkileşimi
+
+# Çift Yönlü Box-M (Etkileşim Grubu İçin)
+# interaction() mantığıyla grupları birleştirip varyans-kovaryans bakıyoruz.
+df_analiz$Grup_Birlesimi <- interaction(df_analiz$EducationField, df_analiz$Gender)
+
+print("--- Kovaryans Homojenliği (Box M - Etkileşimli) ---")
+boxM(df_analiz[, c("Ln_Income", "Ln_Age", "Ln_Sat")], df_analiz$Grup_Birlesimi)
+
+
+# MANOVA Modeli 
+manova_cift <- manova(cbind(Ln_Income, Ln_Age, Ln_Sat) ~ EducationField * Gender, data=df_analiz)
+
+print("---  Çift Yönlü MANOVA Sonucu (Wilks) ---")
+summary(manova_cift, test = "Wilks")
+```
+
+```{r}
+# ETKİ BÜYÜKLÜĞÜ 
+print("---  Çift Yönlü MANOVA Etki Büyüklüğü (Eta Kare) ---")
+etasq(manova_cift, test="Wilks")
+
+
+# LEVENE TESTİ (Etkileşimli)
+# Her değişken için Eğitim*Cinsiyet kırılımında varyans eşitliği.
+print("---  Levene Testi (Etkileşimli - Loglu) ---")
+df_analiz %>% 
+  pivot_longer(c(Ln_Income, Ln_Age, Ln_Sat), names_to = "variable", values_to = "value") %>%
+  group_by(variable) %>%
+  levene_test(value ~ EducationField * Gender, center=mean)
+```
+
+```{r}
+# DEĞİŞKEN BAZLI İNCELEME (Univariate ANOVA)
+# Etkileşimin hangi bağımlı değişken üzerinde anlamlı olduğunu buluyoruz.
+print("---  Her Değişken İçin Ayrı Sonuçlar (ANOVA) ---")
+summary.aov(manova_cift)
+
+# Her bir değişken için ayrı ayrı Eta Kare
+print(">>> Gelir (Ln_Income) İçin Etkileşimli Eta Kare:")
+etasq(aov(Ln_Income ~ EducationField * Gender, data=df_analiz))
+
+print(">>> Yaş (Ln_Age) İçin Etkileşimli Eta Kare:")
+etasq(aov(Ln_Age ~ EducationField * Gender, data=df_analiz))
+```
+```{r}
+# ÇOKLU KARŞILAŞTIRMALAR (ETKİLEŞİMLİ)
+# Yaş ve Tatmin: Varyans Eşit -> TUKEY
+# Gelir (Ln_Income): Varyans Eşit Değil -> GAMES-HOWELL
+
+print("--- A) ETKİLEŞİM İÇİN TUKEY (Yaş ve Tatmin - Varyans Eşit) ---")
+
+# Sadece Yaş ve Tatmin için Tukey (Etkileşimli)
+tukey_cift <- df_analiz %>%
+  dplyr::select(EducationField, Gender, Ln_Age, Ln_Sat) %>%
+  pivot_longer(c(Ln_Age, Ln_Sat), names_to = "variables", values_to = "value") %>%
+  group_by(variables) %>%
+  tukey_hsd(value ~ EducationField * Gender)
+
+# Sadece anlamlı fark varsa gösterelim
+print(tukey_cift %>% filter(p.adj < 0.05))
+
+
+print("--- B) ETKİLEŞİM İÇİN GAMES-HOWELL (Gelir - Varyans Eşit Değil) ---")
+
+# Gelir için Games-Howell (Etkileşim Grupları Üzerinden)
+# Not: Games-Howell tek faktör kabul eder, o yüzden 'Grup_Birlesimi'ni kullanıyoruz.
+
+gh_income_cift <- df_analiz %>%
+  games_howell_test(Ln_Income ~ Grup_Birlesimi)
+
+print("Anlamlı Fark Olan Gruplar (p.adj < 0.05):")
+gh_income_cift %>% filter(p.adj < 0.05)
+```
+
+```{r}
+# ETKİLEŞİM GRAFİKLERİ
+
+print("--- 7. Etkileşim Grafikleri ---")
+
+# GRAFİK: GELİR (Ln_Income)
+interaction.plot(x.factor = df_analiz$EducationField, 
+                 trace.factor = df_analiz$Gender, 
+                 response = df_analiz$Ln_Income, 
+                 fun = mean, type = "b", legend = TRUE, 
+                 col = c("red", "blue"), lwd=2, pch=19,
+                 main = "Etkileşim Grafiği: Log-Gelir", 
+                 xlab="Eğitim Alanı", ylab="Ortalama Ln(Gelir)", 
+                 trace.label="Cinsiyet")
+
+# GRAFİK: YAŞ (Ln_Age)
+interaction.plot(x.factor = df_analiz$EducationField, 
+                 trace.factor = df_analiz$Gender, 
+                 response = df_analiz$Ln_Age, 
+                 fun = mean, type = "b", legend = TRUE, 
+                 col = c("green", "purple"), lwd=2, pch=19,
+                 main = "Etkileşim Grafiği: Log-Yaş", 
+                 xlab="Eğitim Alanı", ylab="Ortalama Ln(Yaş)", 
+                 trace.label="Cinsiyet")
+
+# GRAFİK: İŞ TATMİNİ (Ln_Sat)
+interaction.plot(x.factor = df_analiz$EducationField, 
+                 trace.factor = df_analiz$Gender, 
+                 response = df_analiz$Ln_Sat, 
+                 fun = mean, type = "b", legend = TRUE, 
+                 col = c("orange", "black"), lwd=2, pch=19,
+                 main = "Etkileşim Grafiği: Log-İş Tatmini", 
+                 xlab="Eğitim Alanı", ylab="Ortalama Ln(Tatmin)", 
+                 trace.label="Cinsiyet")
+```
+
+
